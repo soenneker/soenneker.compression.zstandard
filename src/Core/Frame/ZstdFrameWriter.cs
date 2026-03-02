@@ -42,7 +42,7 @@ internal static class ZstdFrameWriter
     private static byte BuildDescriptor(bool writeChecksum)
     {
         // singleSegment=1, frameContentSizeFlag=3 (8 bytes), checksum flag configurable
-        byte descriptor = (byte)((3 << 6) | (1 << 5));
+        var descriptor = (byte)((3 << 6) | (1 << 5));
         if (writeChecksum)
             descriptor |= 1 << 2;
         return descriptor;

@@ -1,6 +1,5 @@
 using Soenneker.Compression.Zstandard.Core.Constants;
 using Soenneker.Compression.Zstandard.Core.Entropy;
-using Soenneker.Compression.Zstandard.Core.Errors;
 using Soenneker.Compression.Zstandard.Core.Frame;
 using Soenneker.Compression.Zstandard.Core.Intrinsics;
 using System;
@@ -10,7 +9,7 @@ namespace Soenneker.Compression.Zstandard.Core.Codec;
 
 internal sealed class ZstdCompressor
 {
-    public int GetCompressBound(int sourceLength)
+    public static int GetCompressBound(int sourceLength)
     {
         if (sourceLength < 0)
             throw new ArgumentOutOfRangeException(nameof(sourceLength));
@@ -30,7 +29,7 @@ internal sealed class ZstdCompressor
             return false;
 
         int outputOffset = headerWritten;
-        int sourceOffset = 0;
+        var sourceOffset = 0;
 
         while (sourceOffset < source.Length || source.Length == 0)
         {

@@ -41,7 +41,7 @@ internal sealed class GrowableBuffer : IDisposable
 
     public byte[] ToArray()
     {
-        byte[] output = new byte[_length];
+        var output = new byte[_length];
         WrittenSpan.CopyTo(output);
         return output;
     }

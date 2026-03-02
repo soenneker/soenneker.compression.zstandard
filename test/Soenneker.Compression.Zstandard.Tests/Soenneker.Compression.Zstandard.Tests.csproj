@@ -21,7 +21,6 @@
     </ItemGroup>
 
     <ItemGroup>
-
         <PackageReference Include="AwesomeAssertions" Version="9.4.0" />
         <PackageReference Include="Soenneker.Utils.Test" Version="4.0.303" />
         <PackageReference Include="Soenneker.Tests.FixturedUnit" Version="4.0.2209" />

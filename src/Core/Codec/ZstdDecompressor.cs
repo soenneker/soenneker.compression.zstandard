@@ -34,7 +34,7 @@ internal sealed class ZstdDecompressor
     private static void DecompressFramesToBuffer(ReadOnlySpan<byte> compressed, out byte[] output, out int written)
     {
         written = 0;
-        int inputOffset = 0;
+        var inputOffset = 0;
         using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
 
         while (inputOffset < compressed.Length)
@@ -111,7 +111,7 @@ internal sealed class ZstdDecompressor
     private static void DecompressFramesToDestination(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)
     {
         written = 0;
-        int inputOffset = 0;
+        var inputOffset = 0;
 
         while (inputOffset < compressed.Length)
         {

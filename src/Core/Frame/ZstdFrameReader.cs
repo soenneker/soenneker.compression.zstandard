@@ -42,7 +42,7 @@ internal static class ZstdFrameReader
         bool hasChecksum = (descriptor & (1 << 2)) != 0;
         int dictIdFlag = descriptor & 0x3;
         int fcsFlag = descriptor >> 6;
-        int index = 5;
+        var index = 5;
         byte? windowDescriptor = null;
 
         if (!singleSegment)
@@ -96,7 +96,7 @@ internal static class ZstdFrameReader
 
         int header = source[0] | (source[1] << 8) | (source[2] << 16);
         bool lastBlock = (header & 0x1) != 0;
-        ZstdBlockType blockType = (ZstdBlockType)((header >> 1) & 0x3);
+        var blockType = (ZstdBlockType)((header >> 1) & 0x3);
         int blockSize = (header >> 3) & 0x1F_FFFF;
 
         if (blockType == ZstdBlockType.Reserved)

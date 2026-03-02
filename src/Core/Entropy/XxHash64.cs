@@ -18,7 +18,7 @@ internal static class XxHash64
     public static ulong Hash64(ReadOnlySpan<byte> data, ulong seed = 0)
     {
         int len = data.Length;
-        int index = 0;
+        var index = 0;
         ulong hash;
 
         if (len >= 32)
