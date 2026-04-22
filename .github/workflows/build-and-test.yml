@@ -38,7 +38,7 @@ jobs:
         run: dotnet build test/Soenneker.Compression.Zstandard.Tests/Soenneker.Compression.Zstandard.Tests.csproj --configuration Release --no-restore --verbosity minimal
 
       - name: Test
-        run: dotnet test test/Soenneker.Compression.Zstandard.Tests/Soenneker.Compression.Zstandard.Tests.csproj --configuration Release --no-build --no-restore --verbosity minimal
+        run: dotnet test --project test/Soenneker.Compression.Zstandard.Tests/Soenneker.Compression.Zstandard.Tests.csproj --configuration Release --no-build --no-restore --verbosity minimal
 
       - name: Pack
         run: dotnet pack src/Soenneker.Compression.Zstandard/Soenneker.Compression.Zstandard.csproj --configuration Release --no-build --no-restore --output . --verbosity minimal
