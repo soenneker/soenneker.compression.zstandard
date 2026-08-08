@@ -5,6 +5,7 @@ using Soenneker.Compression.Zstandard.Core.Intrinsics;
 using Soenneker.Compression.Zstandard.Core.Memory;
 using System;
 using System.Buffers.Binary;
+using System.Text;
 
 namespace Soenneker.Compression.Zstandard.Core.Codec;
 
@@ -15,8 +16,19 @@ internal sealed class ZstdDecompressor
         if (compressed.IsEmpty)
             return Array.Empty<byte>();
 
-        DecompressFramesToBuffer(compressed, out byte[] output, out _);
-        return output;
+        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
+        DecompressFramesToBuffer(compressed, growable, out _);
+        return growable.ToArray();
+    }
+
+    public string DecompressToString(ReadOnlySpan<byte> compressed)
+    {
+        if (compressed.IsEmpty)
+            return string.Empty;
+
+        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
+        DecompressFramesToBuffer(compressed, growable, out _);
+        return Encoding.UTF8.GetString(growable.WrittenSpan);
     }
 
     public void Decompress(ReadOnlySpan<byte> compressed, Span<byte> destination)
@@ -31,12 +43,10 @@ internal sealed class ZstdDecompressor
         return true;
     }
 
-    private static void DecompressFramesToBuffer(ReadOnlySpan<byte> compressed, out byte[] output, out int written)
+    private static void DecompressFramesToBuffer(ReadOnlySpan<byte> compressed, GrowableBuffer growable, out int written)
     {
         written = 0;
         var inputOffset = 0;
-        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
-
         while (inputOffset < compressed.Length)
         {
             ReadOnlySpan<byte> remaining = compressed.Slice(inputOffset);
@@ -76,10 +86,10 @@ internal sealed class ZstdDecompressor
                             throw new ZstdCodecException("RLE block missing payload byte.");
 
                         byte value = compressed[inputOffset++];
-                        Span<byte> temp = block.BlockSize <= 2048 ? stackalloc byte[block.BlockSize] : new byte[block.BlockSize];
-                        FastOps.Fill(temp, value);
-                        growable.Write(temp);
-                        written += temp.Length;
+                        Span<byte> destination = growable.GetSpan(block.BlockSize)[..block.BlockSize];
+                        FastOps.Fill(destination, value);
+                        growable.Advance(block.BlockSize);
+                        written += block.BlockSize;
                         break;
                     }
                     case ZstdBlockType.Compressed:
@@ -104,8 +114,6 @@ internal sealed class ZstdDecompressor
                 inputOffset += 4;
             }
         }
-
-        output = growable.ToArray();
     }
 
     private static void DecompressFramesToDestination(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)

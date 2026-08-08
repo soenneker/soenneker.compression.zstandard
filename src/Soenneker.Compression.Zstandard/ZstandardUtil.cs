@@ -2,6 +2,7 @@ using Soenneker.Extensions.String;
 using Soenneker.Compression.Zstandard.Abstract;
 using Soenneker.Compression.Zstandard.Core.Codec;
 using System;
+using System.Buffers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -38,12 +39,19 @@ public sealed class ZstandardUtil : IZstandardUtil
     public byte[] Compress(ReadOnlySpan<byte> source, int compressionLevel = 3)
     {
         int max = GetMaxCompressedLength(source.Length);
-        var output = new byte[max];
+        byte[] rented = ArrayPool<byte>.Shared.Rent(max);
 
-        if (!TryCompress(source, output.AsSpan(), out int written, compressionLevel))
-            throw new InvalidOperationException("Destination capacity was insufficient for compression output.");
+        try
+        {
+            if (!TryCompress(source, rented.AsSpan(0, max), out int written, compressionLevel))
+                throw new InvalidOperationException("Destination capacity was insufficient for compression output.");
 
-        return output.AsSpan(0, written).ToArray();
+            return rented.AsSpan(0, written).ToArray();
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     public bool TryCompress(string value, Span<byte> destination, out int written, int compressionLevel = 3)
@@ -58,8 +66,7 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public string DecompressToString(ReadOnlySpan<byte> compressed)
     {
-        byte[] bytes = Decompress(compressed);
-        return Encoding.UTF8.GetString(bytes);
+        return _decompressor.DecompressToString(compressed);
     }
 
     public byte[] Decompress(ReadOnlySpan<byte> compressed) => _decompressor.Decompress(compressed);
