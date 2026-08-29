@@ -11,10 +11,10 @@ namespace Soenneker.Compression.Zstandard.Registrars;
 public static class ZstandardUtilRegistrar
 {
     /// <summary>
-    /// Adds zstandard util as singleton.
+    /// Registers Zstandard Util with a singleton lifetime.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <returns>The result of the operation.</returns>
+    /// <param name="services">Service collection that receives the registration.</param>
+    /// <returns>The same service collection, so additional registrations can be chained.</returns>
     public static IServiceCollection AddZstandardUtilAsSingleton(this IServiceCollection services)
     {
         services.AddFileUtilAsSingleton().TryAddSingleton<IZstandardUtil, ZstandardUtil>();
@@ -22,10 +22,10 @@ public static class ZstandardUtilRegistrar
     }
 
     /// <summary>
-    /// Adds zstandard util as scoped.
+    /// Registers Zstandard Util with a scoped lifetime.
     /// </summary>
-    /// <param name="services">The service collection.</param>
-    /// <returns>The result of the operation.</returns>
+    /// <param name="services">Service collection that receives the registration.</param>
+    /// <returns>The same service collection, so additional registrations can be chained.</returns>
     public static IServiceCollection AddZstandardUtilAsScoped(this IServiceCollection services)
     {
         services.AddFileUtilAsScoped().TryAddScoped<IZstandardUtil, ZstandardUtil>();
