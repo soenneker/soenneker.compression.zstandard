@@ -24,6 +24,8 @@ internal static class ZstdFrameReader
         int payloadSize = BinaryPrimitives.ReadInt32LittleEndian(source.Slice(4, 4));
         if (payloadSize < 0)
             throw new ZstdCodecException("Skippable frame payload size is invalid.");
+        if (payloadSize > source.Length - 8)
+            throw new ZstdCodecException("Skippable frame exceeds input bounds.");
 
         return 8 + payloadSize;
     }
@@ -38,9 +40,15 @@ internal static class ZstdFrameReader
             throw new ZstdCodecException("Invalid zstd frame magic number.");
 
         byte descriptor = source[4];
+        if ((descriptor & (1 << 3)) != 0)
+            throw new ZstdCodecException("Frame header uses a reserved descriptor bit.");
+
         bool singleSegment = (descriptor & (1 << 5)) != 0;
         bool hasChecksum = (descriptor & (1 << 2)) != 0;
         int dictIdFlag = descriptor & 0x3;
+        if (dictIdFlag != 0)
+            throw new ZstdCodecException("Dictionary-dependent frames are not supported.");
+
         int fcsFlag = descriptor >> 6;
         var index = 5;
         byte? windowDescriptor = null;
@@ -101,6 +109,8 @@ internal static class ZstdFrameReader
 
         if (blockType == ZstdBlockType.Reserved)
             throw new ZstdCodecException("Encountered reserved zstd block type.");
+        if (blockSize > ZstdConstants.MaxBlockSize)
+            throw new ZstdCodecException("Zstd block exceeds the supported maximum size.");
 
         bytesConsumed = 3;
         return new ZstdBlockHeader(lastBlock, blockType, blockSize);

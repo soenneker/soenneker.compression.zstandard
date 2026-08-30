@@ -16,7 +16,7 @@ internal sealed class ZstdDecompressor
         if (compressed.IsEmpty)
             return Array.Empty<byte>();
 
-        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
+        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length));
         DecompressFramesToBuffer(compressed, growable, out _);
         return growable.ToArray();
     }
@@ -26,7 +26,7 @@ internal sealed class ZstdDecompressor
         if (compressed.IsEmpty)
             return string.Empty;
 
-        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length * 4));
+        using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length));
         DecompressFramesToBuffer(compressed, growable, out _);
         return Encoding.UTF8.GetString(growable.WrittenSpan);
     }
@@ -34,13 +34,16 @@ internal sealed class ZstdDecompressor
     public void Decompress(ReadOnlySpan<byte> compressed, Span<byte> destination)
     {
         if (!TryDecompress(compressed, destination, out _))
-            throw new ArgumentException("Destination too small for decompressed output.", nameof(destination));
+            throw new InvalidOperationException("Destination capacity is insufficient for decompressed output.");
     }
 
     public bool TryDecompress(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)
     {
-        DecompressFramesToDestination(compressed, destination, out written);
-        return true;
+        bool success = DecompressFramesToDestination(compressed, destination, out written);
+        if (!success)
+            written = 0;
+
+        return success;
     }
 
     private static void DecompressFramesToBuffer(ReadOnlySpan<byte> compressed, GrowableBuffer growable, out int written)
@@ -74,6 +77,9 @@ internal sealed class ZstdDecompressor
                 {
                     case ZstdBlockType.Raw:
                     {
+                        if (block.BlockSize > compressed.Length - inputOffset)
+                            throw new ZstdCodecException("Raw block exceeds input bounds.");
+
                         ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
                         growable.Write(blockSrc);
                         written += blockSrc.Length;
@@ -113,10 +119,12 @@ internal sealed class ZstdDecompressor
 
                 inputOffset += 4;
             }
+
+            ValidateFrameContentSize(frameHeader, written - frameStart);
         }
     }
 
-    private static void DecompressFramesToDestination(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)
+    private static bool DecompressFramesToDestination(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)
     {
         written = 0;
         var inputOffset = 0;
@@ -148,9 +156,12 @@ internal sealed class ZstdDecompressor
                 {
                     case ZstdBlockType.Raw:
                     {
+                        if (block.BlockSize > compressed.Length - inputOffset)
+                            throw new ZstdCodecException("Raw block exceeds input bounds.");
+
                         ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
                         if (destination.Length - written < blockSrc.Length)
-                            throw new ArgumentException("Destination too small for decompressed output.");
+                            return false;
                         blockSrc.CopyTo(destination.Slice(written));
                         written += blockSrc.Length;
                         inputOffset += block.BlockSize;
@@ -163,7 +174,7 @@ internal sealed class ZstdDecompressor
 
                         byte value = compressed[inputOffset++];
                         if (destination.Length - written < block.BlockSize)
-                            throw new ArgumentException("Destination too small for decompressed output.");
+                            return false;
 
                         FastOps.Fill(destination.Slice(written, block.BlockSize), value);
                         written += block.BlockSize;
@@ -190,6 +201,16 @@ internal sealed class ZstdDecompressor
 
                 inputOffset += 4;
             }
+
+            ValidateFrameContentSize(frameHeader, written - frameStart);
         }
+
+        return true;
+    }
+
+    private static void ValidateFrameContentSize(ZstdFrameHeader frameHeader, int actualSize)
+    {
+        if (frameHeader.FrameContentSize is ulong expectedSize && expectedSize != (ulong)actualSize)
+            throw new ZstdCodecException("Frame content size does not match the decompressed output.");
     }
 }

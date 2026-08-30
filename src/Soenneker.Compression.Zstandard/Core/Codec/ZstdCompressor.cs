@@ -12,10 +12,15 @@ internal sealed class ZstdCompressor
     public static int GetCompressBound(int sourceLength)
     {
         if (sourceLength < 0)
-            throw new ArgumentOutOfRangeException(nameof(sourceLength));
+            throw new InvalidOperationException("Source length cannot be negative.");
 
-        int blocks = (sourceLength + (ZstdConstants.MaxBlockSize - 1)) / ZstdConstants.MaxBlockSize;
-        return sourceLength + (sourceLength >> 8) + 256 + (blocks * 3) + 16;
+        long blocks = ((long)sourceLength + (ZstdConstants.MaxBlockSize - 1)) / ZstdConstants.MaxBlockSize;
+        long bound = sourceLength + (sourceLength >> 8) + 256L + (blocks * 3) + 16;
+
+        if (bound > Array.MaxLength)
+            throw new InvalidOperationException("Compressed output exceeds the supported in-memory size.");
+
+        return (int)bound;
     }
 
     public bool TryCompress(ReadOnlySpan<byte> source, Span<byte> destination, out int written, int compressionLevel)

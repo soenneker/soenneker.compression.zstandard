@@ -1,8 +1,8 @@
-using Soenneker.Extensions.String;
 using Soenneker.Compression.Zstandard.Abstract;
 using Soenneker.Compression.Zstandard.Core.Codec;
 using System;
 using System.Buffers;
+using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -30,9 +30,6 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public byte[] Compress(string value, int compressionLevel = 3)
     {
-        if (value is null)
-            throw new ArgumentNullException(nameof(value));
-
         return Compress(Encoding.UTF8.GetBytes(value), compressionLevel);
     }
 
@@ -56,9 +53,6 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public bool TryCompress(string value, Span<byte> destination, out int written, int compressionLevel = 3)
     {
-        if (value is null)
-            throw new ArgumentNullException(nameof(value));
-
         return TryCompress(Encoding.UTF8.GetBytes(value), destination, out written, compressionLevel);
     }
 
@@ -77,27 +71,39 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public async ValueTask CompressFile(string sourceFilePath, string destinationFilePath, int compressionLevel = 3, CancellationToken cancellationToken = default)
     {
-        if (sourceFilePath.IsNullOrWhiteSpace())
-            throw new ArgumentException("Source file path cannot be null or empty.", nameof(sourceFilePath));
-
-        if (destinationFilePath.IsNullOrWhiteSpace())
-            throw new ArgumentException("Destination file path cannot be null or empty.", nameof(destinationFilePath));
-
-        byte[] source = await _fileUtil.ReadToBytes(sourceFilePath, log: true, cancellationToken).NoSync();
+        byte[] source = await _fileUtil.ReadToBytes(sourceFilePath, log: false, cancellationToken).NoSync();
         byte[] compressed = Compress(source, compressionLevel);
-        await _fileUtil.Write(destinationFilePath, compressed, log: true, cancellationToken).NoSync();
+        await WriteFileAtomically(destinationFilePath, compressed, cancellationToken).ConfigureAwait(false);
     }
 
     public async ValueTask DecompressFile(string sourceFilePath, string destinationFilePath, CancellationToken cancellationToken = default)
     {
-        if (sourceFilePath.IsNullOrWhiteSpace())
-            throw new ArgumentException("Source file path cannot be null or empty.", nameof(sourceFilePath));
-
-        if (destinationFilePath.IsNullOrWhiteSpace())
-            throw new ArgumentException("Destination file path cannot be null or empty.", nameof(destinationFilePath));
-
-        byte[] compressed = await _fileUtil.ReadToBytes(sourceFilePath, log: true, cancellationToken).NoSync();
+        byte[] compressed = await _fileUtil.ReadToBytes(sourceFilePath, log: false, cancellationToken).NoSync();
         byte[] decompressed = Decompress(compressed);
-        await _fileUtil.Write(destinationFilePath, decompressed, log: true, cancellationToken).NoSync();
+        await WriteFileAtomically(destinationFilePath, decompressed, cancellationToken).ConfigureAwait(false);
+    }
+
+    private async ValueTask WriteFileAtomically(string destinationFilePath, byte[] content, CancellationToken cancellationToken)
+    {
+        string temporaryPath = $"{destinationFilePath}.{Guid.NewGuid():N}.tmp";
+
+        try
+        {
+            await _fileUtil.Write(temporaryPath, content, log: false, cancellationToken).NoSync();
+            File.Move(temporaryPath, destinationFilePath, true);
+        }
+        catch
+        {
+            try
+            {
+                File.Delete(temporaryPath);
+            }
+            catch
+            {
+                // Preserve the original codec or I/O failure.
+            }
+
+            throw;
+        }
     }
 }

@@ -21,13 +21,17 @@ internal sealed class GrowableBuffer : IDisposable
 
     public Span<byte> GetSpan(int sizeHint)
     {
-        EnsureCapacity(_length + sizeHint);
+        long target = (long)_length + sizeHint;
+        if (sizeHint < 0 || target > Array.MaxLength)
+            throw new ZstdCodecException("Decompressed output exceeds the supported in-memory size.");
+
+        EnsureCapacity((int)target);
         return _buffer.AsSpan(_length);
     }
 
     public void Advance(int count)
     {
-        if (count < 0 || _length + count > _buffer.Length)
+        if (count < 0 || (long)_length + count > _buffer.Length)
             throw new ZstdCodecException("Invalid advance count.");
         _length += count;
     }
@@ -48,12 +52,15 @@ internal sealed class GrowableBuffer : IDisposable
 
     private void EnsureCapacity(int target)
     {
+        if (target < 0 || target > Array.MaxLength)
+            throw new ZstdCodecException("Decompressed output exceeds the supported in-memory size.");
+
         if (target <= _buffer.Length)
             return;
 
         int next = _buffer.Length;
         while (next < target)
-            next <<= 1;
+            next = (int)Math.Min((long)next * 2, Array.MaxLength);
 
         byte[] newBuffer = ArrayPool<byte>.Shared.Rent(next);
         _buffer.AsSpan(0, _length).CopyTo(newBuffer);
