@@ -2,7 +2,6 @@ using Soenneker.Compression.Zstandard.Abstract;
 using Soenneker.Compression.Zstandard.Core.Codec;
 using System;
 using System.Buffers;
-using System.IO;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -85,25 +84,6 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     private async ValueTask WriteFileAtomically(string destinationFilePath, byte[] content, CancellationToken cancellationToken)
     {
-        string temporaryPath = $"{destinationFilePath}.{Guid.NewGuid():N}.tmp";
-
-        try
-        {
-            await _fileUtil.Write(temporaryPath, content, log: false, cancellationToken).NoSync();
-            File.Move(temporaryPath, destinationFilePath, true);
-        }
-        catch
-        {
-            try
-            {
-                File.Delete(temporaryPath);
-            }
-            catch
-            {
-                // Preserve the original codec or I/O failure.
-            }
-
-            throw;
-        }
+        await _fileUtil.WriteAtomically(destinationFilePath, content, log: false, cancellationToken).ConfigureAwait(false);
     }
 }
