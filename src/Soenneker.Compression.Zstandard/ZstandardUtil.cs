@@ -1,3 +1,4 @@
+using Soenneker.Extensions.ValueTask;
 using Soenneker.Compression.Zstandard.Abstract;
 using Soenneker.Compression.Zstandard.Core.Codec;
 using System;
@@ -72,18 +73,13 @@ public sealed class ZstandardUtil : IZstandardUtil
     {
         byte[] source = await _fileUtil.ReadToBytes(sourceFilePath, log: false, cancellationToken).NoSync();
         byte[] compressed = Compress(source, compressionLevel);
-        await WriteFileAtomically(destinationFilePath, compressed, cancellationToken).ConfigureAwait(false);
+        await _fileUtil.WriteAtomically(destinationFilePath, compressed, log: false, cancellationToken).NoSync();
     }
 
     public async ValueTask DecompressFile(string sourceFilePath, string destinationFilePath, CancellationToken cancellationToken = default)
     {
         byte[] compressed = await _fileUtil.ReadToBytes(sourceFilePath, log: false, cancellationToken).NoSync();
         byte[] decompressed = Decompress(compressed);
-        await WriteFileAtomically(destinationFilePath, decompressed, cancellationToken).ConfigureAwait(false);
-    }
-
-    private async ValueTask WriteFileAtomically(string destinationFilePath, byte[] content, CancellationToken cancellationToken)
-    {
-        await _fileUtil.WriteAtomically(destinationFilePath, content, log: false, cancellationToken).ConfigureAwait(false);
+        await _fileUtil.WriteAtomically(destinationFilePath, decompressed, log: false, cancellationToken).NoSync();
     }
 }
