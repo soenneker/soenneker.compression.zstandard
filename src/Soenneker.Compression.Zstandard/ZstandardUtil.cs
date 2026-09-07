@@ -30,7 +30,19 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public byte[] Compress(string value, int compressionLevel = 3)
     {
-        return Compress(Encoding.UTF8.GetBytes(value), compressionLevel);
+        int byteCount = Encoding.UTF8.GetByteCount(value);
+        byte[]? rented = null;
+        Span<byte> utf8 = byteCount <= 1024 ? stackalloc byte[byteCount] : (rented = ArrayPool<byte>.Shared.Rent(byteCount)).AsSpan(0, byteCount);
+        try
+        {
+            Encoding.UTF8.GetBytes(value, utf8);
+            return Compress(utf8, compressionLevel);
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     public byte[] Compress(ReadOnlySpan<byte> source, int compressionLevel = 3)
@@ -53,7 +65,19 @@ public sealed class ZstandardUtil : IZstandardUtil
 
     public bool TryCompress(string value, Span<byte> destination, out int written, int compressionLevel = 3)
     {
-        return TryCompress(Encoding.UTF8.GetBytes(value), destination, out written, compressionLevel);
+        int byteCount = Encoding.UTF8.GetByteCount(value);
+        byte[]? rented = null;
+        Span<byte> utf8 = byteCount <= 1024 ? stackalloc byte[byteCount] : (rented = ArrayPool<byte>.Shared.Rent(byteCount)).AsSpan(0, byteCount);
+        try
+        {
+            Encoding.UTF8.GetBytes(value, utf8);
+            return TryCompress(utf8, destination, out written, compressionLevel);
+        }
+        finally
+        {
+            if (rented is not null)
+                ArrayPool<byte>.Shared.Return(rented);
+        }
     }
 
     public bool TryCompress(ReadOnlySpan<byte> source, Span<byte> destination, out int written, int compressionLevel = 3) => _compressor.TryCompress(source, destination, out written, compressionLevel);

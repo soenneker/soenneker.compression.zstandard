@@ -8,17 +8,7 @@ internal static class FastOps
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
     public static bool IsRle(ReadOnlySpan<byte> source)
     {
-        if (source.Length <= 1)
-            return false;
-
-        byte value = source[0];
-        for (var i = 1; i < source.Length; i++)
-        {
-            if (source[i] != value)
-                return false;
-        }
-
-        return true;
+        return source.Length > 1 && !source[1..].ContainsAnyExcept(source[0]);
     }
 
     [MethodImpl(MethodImplOptions.AggressiveInlining)]
