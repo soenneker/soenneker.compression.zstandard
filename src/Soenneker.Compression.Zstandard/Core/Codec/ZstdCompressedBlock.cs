@@ -11,27 +11,31 @@ internal static class ZstdCompressedBlock
     public static int Compress(ReadOnlySpan<byte> source, Span<byte> destination, int level)
     {
         int[] heads = ArrayPool<int>.Shared.Rent(65536);
-        int[] previous = ArrayPool<int>.Shared.Rent(source.Length);
+        int depth = 1 << Math.Min(7, (level - 1) / 3);
+        int[]? previous = depth > 1 ? ArrayPool<int>.Shared.Rent(source.Length) : null;
         byte[] literals = ArrayPool<byte>.Shared.Rent(source.Length);
         ZstdSequence[] sequences = ArrayPool<ZstdSequence>.Shared.Rent(source.Length / 4 + 1);
         try
         {
             heads.AsSpan(0, 65536).Fill(-1);
             int literalCount = 0, sequenceCount = 0, anchor = 0, position = 0;
-            int depth = 1 << Math.Min(7, (level - 1) / 3);
             while (position + 4 <= source.Length)
             {
                 int hash = Hash(source, position);
                 int candidate = heads[hash];
-                previous[position] = candidate;
+                if (previous != null) previous[position] = candidate;
                 heads[hash] = position;
                 int best = 3, offset = 0;
-                for (int attempt = 0; candidate >= 0 && attempt < depth; attempt++, candidate = previous[candidate])
+                for (int attempt = 0; candidate >= 0 && attempt < depth; attempt++, candidate = previous == null ? -1 : previous[candidate])
                 {
                     if (BinaryPrimitives.ReadUInt32LittleEndian(source.Slice(candidate)) != BinaryPrimitives.ReadUInt32LittleEndian(source.Slice(position))) continue;
                     int length = 4;
-                    while (position + length + 8 <= source.Length &&
-                        BinaryPrimitives.ReadUInt64LittleEndian(source.Slice(candidate + length)) == BinaryPrimitives.ReadUInt64LittleEndian(source.Slice(position + length))) length += 8;
+                    while (position + length + 8 <= source.Length)
+                    {
+                        ulong difference = BinaryPrimitives.ReadUInt64LittleEndian(source.Slice(candidate + length)) ^ BinaryPrimitives.ReadUInt64LittleEndian(source.Slice(position + length));
+                        if (difference != 0) { length += BitOperations.TrailingZeroCount(difference) >> 3; break; }
+                        length += 8;
+                    }
                     while (position + length < source.Length && source[candidate + length] == source[position + length]) length++;
                     if (length > best) { best = length; offset = position - candidate; }
                     if (position + best == source.Length) break;
@@ -44,7 +48,7 @@ internal static class ZstdCompressedBlock
                 int end = position + best;
                 for (int insert = position + 1; insert < end && insert + 4 <= source.Length; insert++)
                 {
-                    int h = Hash(source, insert); previous[insert] = heads[h]; heads[h] = insert;
+                    int h = Hash(source, insert); if (previous != null) previous[insert] = heads[h]; heads[h] = insert;
                 }
                 position = anchor = end;
             }
@@ -96,7 +100,7 @@ internal static class ZstdCompressedBlock
         finally
         {
             ArrayPool<int>.Shared.Return(heads);
-            ArrayPool<int>.Shared.Return(previous);
+            if (previous != null) ArrayPool<int>.Shared.Return(previous);
             ArrayPool<byte>.Shared.Return(literals, clearArray: true);
             ArrayPool<ZstdSequence>.Shared.Return(sequences);
         }

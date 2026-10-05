@@ -4,31 +4,31 @@ using Soenneker.Compression.Zstandard.Core.Errors;
 
 namespace Soenneker.Compression.Zstandard.Core.Entropy;
 
-internal sealed class ZstdHuffmanTable
+internal ref struct ZstdHuffmanTable
 {
-    private readonly byte[] _symbols;
-    private readonly byte[] _lengths;
-    private readonly int _log;
+    private readonly Span<ushort> _entries;
+    private int _log;
+    public bool HasTable => _log != 0;
 
-    private ZstdHuffmanTable(ReadOnlySpan<byte> weights, int log)
+    public ZstdHuffmanTable(Span<ushort> entries) => _entries = entries;
+
+    private void Build(scoped ReadOnlySpan<byte> weights, int log)
     {
         _log = log;
-        _symbols = new byte[1 << log];
-        _lengths = new byte[1 << log];
+
         int cursor = 0;
         for (int weight = 1; weight <= log; weight++)
             for (int symbol = 0; symbol < weights.Length; symbol++)
                 if (weights[symbol] == weight)
                 {
                     int width = 1 << (weight - 1);
-                    _symbols.AsSpan(cursor, width).Fill((byte)symbol);
-                    _lengths.AsSpan(cursor, width).Fill((byte)(log + 1 - weight));
+                    _entries.Slice(cursor, width).Fill((ushort)(symbol | ((log + 1 - weight) << 8)));
                     cursor += width;
                 }
-        if (cursor != _symbols.Length) throw new ZstdCodecException("Incomplete Huffman tree.");
+        if (cursor != 1 << log) throw new ZstdCodecException("Incomplete Huffman tree.");
     }
 
-    public static ZstdHuffmanTable Read(ReadOnlySpan<byte> source, ref int cursor)
+    public void Read(ReadOnlySpan<byte> source, ref int cursor)
     {
         if (cursor >= source.Length) throw new ZstdCodecException("Missing Huffman header.");
         int header = source[cursor++];
@@ -76,7 +76,7 @@ internal sealed class ZstdHuffmanTable
         weights[count++] = (byte)(BitOperations.Log2((uint)remainder) + 1);
         if (remainder == 1) ones++;
         if (ones < 2 || (ones & 1) != 0) throw new ZstdCodecException("Invalid Huffman leaf weights.");
-        return new ZstdHuffmanTable(weights.Slice(0, count), log);
+        Build(weights.Slice(0, count), log);
     }
 
     public void Decode(ReadOnlySpan<byte> source, Span<byte> output)
@@ -84,11 +84,10 @@ internal sealed class ZstdHuffmanTable
         var bits = new ZstdBitReader(source);
         for (int i = 0; i < output.Length; i++)
         {
-            var peek = bits;
-            int available = Math.Min(_log, peek.Remaining);
-            int index = (int)peek.Read(available) << (_log - available);
-            bits.Read(_lengths[index]);
-            output[i] = _symbols[index];
+            int index = bits.PeekPadded(_log);
+            ushort entry = _entries[index];
+            bits.Skip(entry >> 8);
+            output[i] = (byte)entry;
         }
         if (bits.Remaining != 0) throw new ZstdCodecException("Unconsumed Huffman bits.");
     }

@@ -17,6 +17,13 @@ internal sealed class ZstdDecompressor
         if (compressed.IsEmpty)
             return Array.Empty<byte>();
 
+        if (TryGetTotalContentSize(compressed, out int size))
+        {
+            byte[] output = GC.AllocateUninitializedArray<byte>(size);
+            if (!TryDecompress(compressed, output, out int written) || written != size)
+                throw new ZstdCodecException("Frame content size does not match the decompressed output.");
+            return output;
+        }
         using var growable = new GrowableBuffer(Math.Min(4096, compressed.Length));
         DecompressFramesToBuffer(compressed, growable, out _);
         return growable.ToArray();
@@ -49,6 +56,7 @@ internal sealed class ZstdDecompressor
 
     private static void DecompressFramesToBuffer(ReadOnlySpan<byte> compressed, GrowableBuffer growable, out int written)
     {
+        Span<ushort> huffmanEntries = stackalloc ushort[2048];
         written = 0;
         var inputOffset = 0;
         while (inputOffset < compressed.Length)
@@ -67,7 +75,7 @@ internal sealed class ZstdDecompressor
             ZstdFrameHeader frameHeader = ZstdFrameReader.ReadFrameHeader(remaining, out int headerSize);
             inputOffset += headerSize;
             int frameStart = written;
-            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue));
+            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue), huffmanEntries);
 
             bool last;
             do
@@ -79,36 +87,36 @@ internal sealed class ZstdDecompressor
                 switch (block.BlockType)
                 {
                     case ZstdBlockType.Raw:
-                    {
-                        if (block.BlockSize > compressed.Length - inputOffset)
-                            throw new ZstdCodecException("Raw block exceeds input bounds.");
+                        {
+                            if (block.BlockSize > compressed.Length - inputOffset)
+                                throw new ZstdCodecException("Raw block exceeds input bounds.");
 
-                        ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
-                        growable.Write(blockSrc);
-                        written += blockSrc.Length;
-                        inputOffset += block.BlockSize;
-                        break;
-                    }
+                            ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
+                            growable.Write(blockSrc);
+                            written += blockSrc.Length;
+                            inputOffset += block.BlockSize;
+                            break;
+                        }
                     case ZstdBlockType.Rle:
-                    {
-                        if (inputOffset >= compressed.Length)
-                            throw new ZstdCodecException("RLE block missing payload byte.");
+                        {
+                            if (inputOffset >= compressed.Length)
+                                throw new ZstdCodecException("RLE block missing payload byte.");
 
-                        byte value = compressed[inputOffset++];
-                        Span<byte> destination = growable.GetSpan(block.BlockSize)[..block.BlockSize];
-                        FastOps.Fill(destination, value);
-                        growable.Advance(block.BlockSize);
-                        written += block.BlockSize;
-                        break;
-                    }
+                            byte value = compressed[inputOffset++];
+                            Span<byte> destination = growable.GetSpan(block.BlockSize)[..block.BlockSize];
+                            FastOps.Fill(destination, value);
+                            growable.Advance(block.BlockSize);
+                            written += block.BlockSize;
+                            break;
+                        }
                     case ZstdBlockType.Compressed:
-                    {
-                        if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
-                        growable.GetSpan(ZstdConstants.MaxBlockSize);
-                        if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), growable.Buffer.Slice(frameStart), written - frameStart, out int size)) throw new ZstdCodecException("Block exceeds size limit.");
-                        growable.Advance(size); written += size; inputOffset += block.BlockSize;
-                        break;
-                    }
+                        {
+                            if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
+                            growable.GetSpan(ZstdConstants.MaxBlockSize);
+                            if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), growable.Buffer.Slice(frameStart), written - frameStart, out int size)) throw new ZstdCodecException("Block exceeds size limit.");
+                            growable.Advance(size); written += size; inputOffset += block.BlockSize;
+                            break;
+                        }
                     default:
                         throw new ZstdCodecException("Encountered unknown zstd block type.");
                 }
@@ -135,6 +143,7 @@ internal sealed class ZstdDecompressor
 
     private static bool DecompressFramesToDestination(ReadOnlySpan<byte> compressed, Span<byte> destination, out int written)
     {
+        Span<ushort> huffmanEntries = stackalloc ushort[2048];
         written = 0;
         var inputOffset = 0;
 
@@ -154,7 +163,7 @@ internal sealed class ZstdDecompressor
             ZstdFrameHeader frameHeader = ZstdFrameReader.ReadFrameHeader(remaining, out int headerSize);
             inputOffset += headerSize;
             int frameStart = written;
-            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue));
+            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue), huffmanEntries);
 
             bool last;
             do
@@ -166,38 +175,38 @@ internal sealed class ZstdDecompressor
                 switch (block.BlockType)
                 {
                     case ZstdBlockType.Raw:
-                    {
-                        if (block.BlockSize > compressed.Length - inputOffset)
-                            throw new ZstdCodecException("Raw block exceeds input bounds.");
+                        {
+                            if (block.BlockSize > compressed.Length - inputOffset)
+                                throw new ZstdCodecException("Raw block exceeds input bounds.");
 
-                        ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
-                        if (destination.Length - written < blockSrc.Length)
-                            return false;
-                        blockSrc.CopyTo(destination.Slice(written));
-                        written += blockSrc.Length;
-                        inputOffset += block.BlockSize;
-                        break;
-                    }
+                            ReadOnlySpan<byte> blockSrc = compressed.Slice(inputOffset, block.BlockSize);
+                            if (destination.Length - written < blockSrc.Length)
+                                return false;
+                            blockSrc.CopyTo(destination.Slice(written));
+                            written += blockSrc.Length;
+                            inputOffset += block.BlockSize;
+                            break;
+                        }
                     case ZstdBlockType.Rle:
-                    {
-                        if (inputOffset >= compressed.Length)
-                            throw new ZstdCodecException("RLE block missing payload byte.");
+                        {
+                            if (inputOffset >= compressed.Length)
+                                throw new ZstdCodecException("RLE block missing payload byte.");
 
-                        byte value = compressed[inputOffset++];
-                        if (destination.Length - written < block.BlockSize)
-                            return false;
+                            byte value = compressed[inputOffset++];
+                            if (destination.Length - written < block.BlockSize)
+                                return false;
 
-                        FastOps.Fill(destination.Slice(written, block.BlockSize), value);
-                        written += block.BlockSize;
-                        break;
-                    }
+                            FastOps.Fill(destination.Slice(written, block.BlockSize), value);
+                            written += block.BlockSize;
+                            break;
+                        }
                     case ZstdBlockType.Compressed:
-                    {
-                        if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
-                        if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), destination.Slice(frameStart), written - frameStart, out int size)) return false;
-                        written += size; inputOffset += block.BlockSize;
-                        break;
-                    }
+                        {
+                            if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
+                            if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), destination.Slice(frameStart), written - frameStart, out int size)) return false;
+                            written += size; inputOffset += block.BlockSize;
+                            break;
+                        }
                     default:
                         throw new ZstdCodecException("Encountered unknown zstd block type.");
                 }
@@ -222,6 +231,49 @@ internal sealed class ZstdDecompressor
         }
 
         return true;
+    }
+
+    private static bool TryGetTotalContentSize(ReadOnlySpan<byte> compressed, out int size)
+    {
+        long total = 0;
+        int cursor = 0;
+        while (cursor < compressed.Length)
+        {
+            ReadOnlySpan<byte> remaining = compressed.Slice(cursor);
+            if (ZstdFrameReader.IsSkippableFrame(remaining))
+            {
+                int skip = ZstdFrameReader.ReadSkippableFrameSize(remaining);
+                if (skip > remaining.Length) throw new ZstdCodecException("Skippable frame exceeds input bounds.");
+                cursor += skip;
+                continue;
+            }
+            ZstdFrameHeader header = ZstdFrameReader.ReadFrameHeader(remaining, out int headerSize);
+            if (header.FrameContentSize is not ulong contentSize) { size = 0; return false; }
+            if (contentSize > (ulong)(Array.MaxLength - total)) throw new ZstdCodecException("Decompressed output exceeds the supported in-memory size.");
+            total += (long)contentSize;
+            cursor += headerSize;
+            ulong possibleOutput = 0;
+            bool last;
+            do
+            {
+                ZstdBlockHeader block = ZstdFrameReader.ReadBlockHeader(compressed.Slice(cursor), out int blockHeaderSize);
+                cursor += blockHeaderSize;
+                possibleOutput += block.BlockType == ZstdBlockType.Compressed ? Math.Min(header.WindowSize, (ulong)ZstdConstants.MaxBlockSize) : (ulong)block.BlockSize;
+                int payload = block.BlockType == ZstdBlockType.Rle ? 1 : block.BlockSize;
+                if (payload > compressed.Length - cursor) throw new ZstdCodecException("Block exceeds input bounds.");
+                cursor += payload;
+                last = block.IsLastBlock;
+            } while (!last);
+            if (contentSize > possibleOutput) throw new ZstdCodecException("Frame content size exceeds its blocks output bound.");
+            if (header.HasChecksum)
+            {
+                if (compressed.Length - cursor < 4) throw new ZstdCodecException("Missing frame checksum.");
+                cursor += 4;
+            }
+        }
+        // Large declared sizes use incremental growth rather than trusting an unvalidated header allocation.
+        size = (int)total;
+        return total <= 64 * 1024 * 1024;
     }
 
     private static void ValidateFrameContentSize(ZstdFrameHeader frameHeader, int actualSize)

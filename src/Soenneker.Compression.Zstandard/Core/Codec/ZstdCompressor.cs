@@ -27,7 +27,7 @@ internal sealed class ZstdCompressor
     public bool TryCompress(ReadOnlySpan<byte> source, Span<byte> destination, out int written, int compressionLevel)
     {
         if (compressionLevel is < 1 or > 22) throw new ArgumentOutOfRangeException(nameof(compressionLevel), "Supported levels are 1 through 22.");
-        byte[] scratch = ArrayPool<byte>.Shared.Rent(ZstdConstants.MaxBlockSize * 2);
+        byte[] scratch = ArrayPool<byte>.Shared.Rent(Math.Max(32, Math.Min(source.Length, ZstdConstants.MaxBlockSize) * 2));
         try
         {
             written = 0;

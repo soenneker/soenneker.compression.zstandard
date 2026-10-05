@@ -7,16 +7,17 @@ using Soenneker.Compression.Zstandard.Core.Constants;
 
 namespace Soenneker.Compression.Zstandard.Core.Codec;
 
-internal struct ZstdBlockDecoder
+internal ref struct ZstdBlockDecoder
 {
     private ZstdFseTable? _ll, _ml, _of;
-    private ZstdHuffmanTable? _huffman;
+    private ZstdHuffmanTable _huffman;
     private readonly int _windowSize;
     private readonly int _blockLimit;
     private int _repeat1, _repeat2, _repeat3;
 
-    public ZstdBlockDecoder(int windowSize)
+    public ZstdBlockDecoder(int windowSize, Span<ushort> huffmanEntries)
     {
+        _huffman = new ZstdHuffmanTable(huffmanEntries);
         _repeat1 = 1; _repeat2 = 4; _repeat3 = 8;
         _windowSize = windowSize;
         _blockLimit = Math.Min(windowSize, ZstdConstants.MaxBlockSize);
@@ -48,8 +49,8 @@ internal struct ZstdBlockDecoder
             if (literalSize > _blockLimit || packedSize == 0 || packedSize > source.Length - cursor) throw new ZstdCodecException("Invalid Huffman literals size.");
             ReadOnlySpan<byte> packed = source.Slice(cursor, packedSize); cursor += packedSize;
             int offset = 0;
-            if (type == 2) _huffman = ZstdHuffmanTable.Read(packed, ref offset);
-            if (_huffman == null) throw new ZstdCodecException("Missing previous Huffman tree.");
+            if (type == 2) _huffman.Read(packed, ref offset);
+            if (!_huffman.HasTable) throw new ZstdCodecException("Missing previous Huffman tree.");
             if (format == 0) _huffman.Decode(packed.Slice(offset), scratch.Slice(0, literalSize));
             else
             {
@@ -114,8 +115,22 @@ internal struct ZstdBlockDecoder
                     if (code != 1) { if (code != 2) _repeat3 = _repeat2; _repeat2 = _repeat1; _repeat1 = offset; }
                 }
                 if (offset <= 0 || offset > position || offset > _windowSize) throw new ZstdCodecException("Match offset exceeds frame history.");
-                // Forward copy is required for overlapping matches.
-                for (int n = 0; n < match; n++) output[position + n] = output[position + n - offset];
+                // Seed the repeating pattern from history, then double the initialized region.
+                // A single memmove is insufficient when a match is longer than its offset.
+                Span<byte> target = output.Slice(position, match);
+                if (offset == 1) target.Fill(output[position - 1]);
+                else if (offset >= match) output.Slice(position - offset, match).CopyTo(target);
+                else
+                {
+                    output.Slice(position - offset, offset).CopyTo(target);
+                    int copied = offset;
+                    while (copied < match)
+                    {
+                        int lengthToCopy = Math.Min(copied, match - copied);
+                        target.Slice(0, lengthToCopy).CopyTo(target.Slice(copied));
+                        copied += lengthToCopy;
+                    }
+                }
                 position += match;
                 if (i + 1 < sequences)
                 {
