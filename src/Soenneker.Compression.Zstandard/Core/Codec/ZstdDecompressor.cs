@@ -4,6 +4,7 @@ using Soenneker.Compression.Zstandard.Core.Frame;
 using Soenneker.Compression.Zstandard.Core.Intrinsics;
 using Soenneker.Compression.Zstandard.Core.Memory;
 using System;
+using Soenneker.Compression.Zstandard.Core.Constants;
 using System.Buffers.Binary;
 using System.Text;
 
@@ -66,12 +67,14 @@ internal sealed class ZstdDecompressor
             ZstdFrameHeader frameHeader = ZstdFrameReader.ReadFrameHeader(remaining, out int headerSize);
             inputOffset += headerSize;
             int frameStart = written;
+            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue));
 
             bool last;
             do
             {
                 ZstdBlockHeader block = ZstdFrameReader.ReadBlockHeader(compressed.Slice(inputOffset), out int blockHeaderSize);
                 inputOffset += blockHeaderSize;
+                if ((ulong)block.BlockSize > frameHeader.WindowSize) throw new ZstdCodecException("Block exceeds declared window size.");
 
                 switch (block.BlockType)
                 {
@@ -99,7 +102,13 @@ internal sealed class ZstdDecompressor
                         break;
                     }
                     case ZstdBlockType.Compressed:
-                        throw new ZstdCodecException("Compressed zstd blocks are not yet supported in this implementation.");
+                    {
+                        if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
+                        growable.GetSpan(ZstdConstants.MaxBlockSize);
+                        if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), growable.Buffer.Slice(frameStart), written - frameStart, out int size)) throw new ZstdCodecException("Block exceeds size limit.");
+                        growable.Advance(size); written += size; inputOffset += block.BlockSize;
+                        break;
+                    }
                     default:
                         throw new ZstdCodecException("Encountered unknown zstd block type.");
                 }
@@ -145,12 +154,14 @@ internal sealed class ZstdDecompressor
             ZstdFrameHeader frameHeader = ZstdFrameReader.ReadFrameHeader(remaining, out int headerSize);
             inputOffset += headerSize;
             int frameStart = written;
+            var decoder = new ZstdBlockDecoder((int)Math.Min(frameHeader.WindowSize, int.MaxValue));
 
             bool last;
             do
             {
                 ZstdBlockHeader block = ZstdFrameReader.ReadBlockHeader(compressed.Slice(inputOffset), out int blockHeaderSize);
                 inputOffset += blockHeaderSize;
+                if ((ulong)block.BlockSize > frameHeader.WindowSize) throw new ZstdCodecException("Block exceeds declared window size.");
 
                 switch (block.BlockType)
                 {
@@ -181,7 +192,12 @@ internal sealed class ZstdDecompressor
                         break;
                     }
                     case ZstdBlockType.Compressed:
-                        throw new ZstdCodecException("Compressed zstd blocks are not yet supported in this implementation.");
+                    {
+                        if (block.BlockSize > ZstdConstants.MaxBlockSize || block.BlockSize > compressed.Length - inputOffset) throw new ZstdCodecException("Invalid compressed block size.");
+                        if (!decoder.Decode(compressed.Slice(inputOffset, block.BlockSize), destination.Slice(frameStart), written - frameStart, out int size)) return false;
+                        written += size; inputOffset += block.BlockSize;
+                        break;
+                    }
                     default:
                         throw new ZstdCodecException("Encountered unknown zstd block type.");
                 }

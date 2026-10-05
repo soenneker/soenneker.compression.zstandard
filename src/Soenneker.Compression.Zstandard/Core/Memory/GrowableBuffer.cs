@@ -17,6 +17,8 @@ internal sealed class GrowableBuffer : IDisposable
 
     public int Length => _length;
 
+    public Span<byte> Buffer => _buffer;
+
     public ReadOnlySpan<byte> WrittenSpan => _buffer.AsSpan(0, _length);
 
     public Span<byte> GetSpan(int sizeHint)

@@ -11,7 +11,6 @@ using Soenneker.Utils.File.Abstract;
 
 namespace Soenneker.Compression.Zstandard;
 
-/// <inheritdoc cref="IZstandardUtil"/>
 public sealed class ZstandardUtil : IZstandardUtil
 {
     private readonly IFileUtil _fileUtil;
