@@ -1,5 +1,7 @@
 using System;
 using System.Buffers.Binary;
+using System.IO;
+using System.IO.Compression;
 
 namespace Soenneker.Compression.Zstandard.Tests;
 
@@ -42,8 +44,53 @@ public sealed class ZstandardBufferTests
         byte[] frame = { 0x28, 0xb5, 0x2f, 0xfd, 0xa0, 0, 0, 0, 0, 9, 0, 0, 1 };
         BinaryPrimitives.WriteUInt32LittleEndian(frame.AsSpan(5), 1024 * 1024 * 1024);
         bool failed = false;
-        try { _util.Decompress(frame); } catch (Exception e) when (e.GetType().Name == "ZstdCodecException") { failed = true; }
+        try { _util.Decompress(frame); } catch (IOException) { failed = true; }
         Require(failed);
+    }
+
+    [Test]
+    public void EmptyAndSkippableFramesFitEmptyDestination()
+    {
+        byte[] empty = _util.Compress(ReadOnlySpan<byte>.Empty);
+        byte[] skippable = { 0x50, 0x2a, 0x4d, 0x18, 3, 0, 0, 0, 1, 2, 3 };
+        byte[] combined = new byte[empty.Length * 2 + skippable.Length];
+        empty.CopyTo(combined, 0);
+        skippable.CopyTo(combined, empty.Length);
+        empty.CopyTo(combined, empty.Length + skippable.Length);
+
+        Require(_util.TryDecompress(combined, Span<byte>.Empty, out int written) && written == 0);
+        Require(_util.Decompress(combined).Length == 0);
+        Require(_util.TryDecompress(ReadOnlySpan<byte>.Empty, Span<byte>.Empty, out written) && written == 0);
+    }
+
+    [Test]
+    public void SpanDecoderRejectsTruncatedAndCorruptFrames()
+    {
+        byte[] frame = _util.Compress("hello");
+        for (int length = 1; length < frame.Length; length++)
+        {
+            bool failed = false;
+            try { _util.TryDecompress(frame.AsSpan(0, length), new byte[5], out _); }
+            catch (InvalidDataException) { failed = true; }
+            Require(failed);
+        }
+
+        frame[^1] ^= 1;
+        bool corrupt = false;
+        try { _util.TryDecompress(frame, new byte[5], out _); }
+        catch (InvalidDataException) { corrupt = true; }
+        Require(corrupt);
+    }
+
+    [Test]
+    public void EncodedFramesCanBeDecodedByDotNet()
+    {
+        byte[] input = new byte[131073];
+        new Random(17).NextBytes(input);
+        byte[] frame = _util.Compress(input);
+        byte[] output = new byte[input.Length];
+        Require(ZstandardDecoder.TryDecompress(frame, output, out int written));
+        Require(written == input.Length && input.AsSpan().SequenceEqual(output));
     }
 }
 

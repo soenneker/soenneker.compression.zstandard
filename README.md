@@ -4,7 +4,7 @@
 [![](https://img.shields.io/github/actions/workflow/status/soenneker/soenneker.compression.zstandard/codeql.yml?label=CodeQL&style=for-the-badge)](https://github.com/soenneker/soenneker.compression.zstandard/actions/workflows/codeql.yml)
 
 # ![](https://user-images.githubusercontent.com/4441470/224455560-91ed3ee7-f510-4041-a8d2-3fc093025112.png) Soenneker.Compression.Zstandard
-Managed Zstandard frame encoding and decoding for in-memory values and files.
+.NET 11 Zstandard compression and decompression for in-memory values and files.
 
 ## Install
 
@@ -14,12 +14,12 @@ dotnet add package Soenneker.Compression.Zstandard
 
 ## Codec support
 
-This package is a fully managed C# Zstandard implementation (no native `libzstd`, no external binaries).
+This package uses the built-in .NET 11 `System.IO.Compression` Zstandard encoder and decoder.
 
-- Encoding emits standards-compliant `.zst` frames using raw or run-length encoded blocks and includes a checksum.
-- Decoding accepts raw and run-length encoded blocks, concatenated frames, and skippable frames, and validates frame checksums and declared content sizes. Dictionary-dependent frames are not supported.
-- Entropy-coded compressed blocks are not supported. Most `.zst` files created by general-purpose Zstandard tools therefore cannot be decoded by this package.
-- `compressionLevel` is reserved for future entropy encoding and does not change output today.
+- Encoding emits checksummed `.zst` frames.
+- Decoding supports compressed, raw, and run-length encoded blocks, concatenated frames, and skippable frames, with checksum and content-size validation. Dictionary-dependent frames are not supported by this utility.
+- `compressionLevel` accepts 1 through 22 (default 3); higher levels favor compression ratio over speed.
+- Browser/WebAssembly is not supported by the built-in codec.
 
 ## Registration
 
@@ -54,7 +54,7 @@ if (zstandardUtil.TryCompress(source, compressed, out int compressedBytes))
 }
 ```
 
-`TryCompress` and `TryDecompress` return `false` when the destination is too small. Invalid frames and unsupported entropy-coded blocks throw a codec exception.
+`TryCompress` and `TryDecompress` return `false` when the destination is too small. Invalid or truncated frames throw an exception.
 
 ## Files
 
