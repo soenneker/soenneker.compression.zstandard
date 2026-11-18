@@ -101,15 +101,19 @@ public sealed class ZstandardUtil : IZstandardUtil
         throw new InvalidOperationException("Zstandard compression did not complete.");
     }
 
-    public string DecompressToString(ReadOnlySpan<byte> compressed) => Encoding.UTF8.GetString(Decompress(compressed));
+    public string DecompressToString(ReadOnlySpan<byte> compressed) =>
+        Decompress(compressed, static bytes => Encoding.UTF8.GetString(bytes));
 
-    public byte[] Decompress(ReadOnlySpan<byte> compressed)
+    public byte[] Decompress(ReadOnlySpan<byte> compressed) =>
+        Decompress(compressed, static bytes => bytes.ToArray());
+
+    private static TResult Decompress<TResult>(ReadOnlySpan<byte> compressed, Func<ReadOnlySpan<byte>, TResult> materialize)
     {
         if (compressed.IsEmpty)
-            return Array.Empty<byte>();
+            return materialize([]);
 
         using var decoder = new ZstandardDecoder();
-        using var output = new MemoryStream();
+        MemoryStream? output = null;
         byte[] buffer = ArrayPool<byte>.Shared.Rent(81920);
         try
         {
@@ -117,13 +121,22 @@ public sealed class ZstandardUtil : IZstandardUtil
             {
                 OperationStatus status = decoder.Decompress(compressed, buffer, out int consumed, out int written);
                 compressed = compressed[consumed..];
-                output.Write(buffer.AsSpan(0, written));
-                if (status == OperationStatus.Done)
+                if (status == OperationStatus.Done && compressed.IsEmpty)
                 {
-                    if (compressed.IsEmpty)
-                        return output.ToArray();
-                    decoder.Reset();
+                    if (output is null)
+                        return materialize(buffer.AsSpan(0, written));
+
+                    output.Write(buffer.AsSpan(0, written));
+                    return materialize(output.GetBuffer().AsSpan(0, (int)output.Length));
                 }
+
+                if (written > 0)
+                {
+                    output ??= new MemoryStream();
+                    output.Write(buffer.AsSpan(0, written));
+                }
+                if (status == OperationStatus.Done)
+                    decoder.Reset();
                 else if (status == OperationStatus.InvalidData ||
                          status == OperationStatus.NeedMoreData && compressed.IsEmpty ||
                          consumed == 0 && written == 0)
@@ -134,6 +147,7 @@ public sealed class ZstandardUtil : IZstandardUtil
         }
         finally
         {
+            output?.Dispose();
             ArrayPool<byte>.Shared.Return(buffer);
         }
     }
